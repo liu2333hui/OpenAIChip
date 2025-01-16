@@ -1,0 +1,2 @@
+`define MAX_PRECISION 8
+`define CLK_PERIOD 10

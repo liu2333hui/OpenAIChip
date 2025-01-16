@@ -1,0 +1,2 @@
+paddleslim==2.4.1
+paddlepaddle==2.4.1
