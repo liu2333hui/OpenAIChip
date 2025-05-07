@@ -33,6 +33,13 @@ python3 src/main/python3/WinogradConv.py
 ```
 
 ## 3. Design Generation
+### Testing Individual Primitives, for example a multiplier or adder or crossbar
+```
+sbt "test:runMain multipliers.Multiplier2Spec"
+sbt "test:runMain adders.AdderN"
+sbt "test:runMain networks.Crossbar"
+```
+
 ### From a json file
 ```
 python3 src/main/python/GenerateDesign.py arch.json
