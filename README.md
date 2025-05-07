@@ -1,4 +1,4 @@
-# OSCAR : A Comprehensive AI Generator and Accurate Power Estimator
+# OSCAR: An Open-Source Comprehensive AI Accelerator Generator with Accurate Architectural Power Model
 
 OSCAR is a comprehensive AI generator and accurate power estimator. It is comprised of several modules that allow for accurate modeling and generation of AI accelerators.
 1. Primitive Generation (Chisel or Verilog)
