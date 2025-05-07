@@ -1,0 +1,114 @@
+{
+    "name": "SimpleLiberationLibrary",
+    "version": 1.0,
+    "modules": {
+
+
+        "MaxNTree": {
+
+
+        },
+        "MaxNAccumulator": {
+
+        },
+
+
+
+        "Adder2Simple":{
+
+        },
+        "Adder2RCA":{
+
+        },
+        "AdderNTree": {
+
+        },
+        "AdderNSimple":{
+
+        },
+        "AdderNAccumulator":{
+
+        },
+
+
+
+
+        "Multiplier2Simple": {
+
+        },
+        "Multiplier2Radix":{
+
+        },
+        "Multiplier2BitSerial":{
+
+        },
+        "Multiplier2Multiprecision":{
+
+        },
+
+
+
+
+        "ExponentialCordic":{
+
+        },
+        "ExponentialLUT":{
+
+        },
+        "SoftmaxUnit":{
+
+        },
+
+
+
+        "Divider2Simple":{
+
+        },
+        "Divider2Radix":{
+
+        },
+
+
+
+        "BatchNormUnit":{
+
+        },
+        "ReluUnit":{
+
+        },
+        "TanhUnit":{
+
+        },
+        "SigmoidUnit":{
+
+        },
+
+
+
+        "RegisterSimple":{
+
+        },
+        "MulticastSimple":{
+
+        },
+        "SRAMSimple":{
+
+        },
+        "FIFOSimple":{
+
+        },
+        "Parallel2Serial":{
+
+        },
+        "Serial2Parallel":{
+
+        }
+        
+
+
+
+
+
+
+    }
+}
