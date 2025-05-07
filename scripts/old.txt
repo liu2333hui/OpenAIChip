@@ -1,0 +1,614 @@
+#Python is too slow, so it will compile a C-version
+	#This c-version will then be executed
+	#Then we get the results and return
+	def infer_fc_v1(self, name, input_data, weights, Randomize = False):
+		"""
+		实现全连接层操作。
+		:param input_data: 输入数据，形状为 (B, I)
+		:return: 全连接结果，形状为 (B, N)
+		#0. Workflow
+		#1. Create C++ (for different modeled components)
+		#2. Run C++ (g++ ./C_file.cpp)
+		#3. Read in the C++ file (i.e. bins) and run the power model
+		#4. (if enabled verification) Create Scala Chisel code
+		#5. (Run Scala + vcd generated power model)
+		#6. (if enabled comparison) Compare Chisel vs. C++ model
+		"""
+		
+		#0. Prepare data
+		input_data = input_data[0] #if is tuple
+		IN =  weights.shape[0]
+		OUT = weights.shape[1]
+		BAT = input_data.shape[0]
+		print(input_data.shape)
+		assert(input_data.shape[1] == weights.shape[0])
+
+		#quantize (fixed point)
+		#(todos) some algorithm to choose the scaling ?
+		weights    = ((weights*256*256) %self.WEI_PREC).astype(np.int32)
+		input_data = ((input_data*256*256) %self.ACT_PREC).astype(np.int32)
+		
+		
+		#Randomize weights and inputs (TODOS)
+		if(Randomize):
+			n = IN*OUT
+			k = int(n*self.Wei_Sparse)
+			rand_wei = np.random.randint(0, 256, size=n)
+			zero_indices = np.random.choice(n, k, replace=False)
+			rand_wei[zero_indices] = 0
+			
+			n = IN*BAT
+			k = int(n*self.Act_Sparse)
+			rand_act = np.random.randint(0, 256, size=n)
+			zero_indices = np.random.choice(n, k, replace=False)
+			rand_act[zero_indices] = 0
+			
+			weights = rand_wei.reshape((IN, OUT))
+			input_data = rand_act.reshape((BAT, IN))
+		
+		w_file = self.root+"/"+name+".weights.txt"
+		i_file = self.root+"/"+name+".input.txt"
+		if(self.np_save):
+			np.savetxt(w_file, weights, fmt='%d', delimiter='\n')
+			np.savetxt(i_file, input_data, fmt='%d', delimiter='\n')
+		# if(self.np_save):	
+		# 	with open(w_file, "w") as f:
+		# 		for i in range(IN):
+		# 			for n in range(OUT):
+		# 				f.write(str(weights[i][n]) + '\n')
+		# 	with open(i_file, "w") as f:
+		# 		for i in range(IN):
+		# 			for b in range(BAT):
+		# 				f.write(str(input_data[b][i]) + '\n')				
+				
+		# for w in input_data.reshape((-1)):
+		# 	f.write(str(w) + '\n')
+		
+		#1. Create C++
+		
+		#WEI_TOGGLE, used by DRAM,DRAM-L2, L2, L2-L1, L1, L1-PE
+		WEI_TOGGLE_file = self.root+"/"+name+".WEI_TOGGLE_file.cpp"
+		WEI_L1_PE_OUT = self.root+"/"+name+".WEI_PE.out"
+		WEI_L1_TRACE_FILE = WEI_L1_PE_OUT+".trace"
+		WEI_L1_JSON_FILE = WEI_L1_PE_OUT+".json"
+		WEI_L1_POWER_GOLDEN = WEI_L1_PE_OUT+".golden.txt"		
+		
+		WEI_L1_OUT = self.root+"/"+name+".WEI_L1.out"
+		WEI_L2_L1_OUT = self.root+"/"+name+".WEI_L2_L1.out"
+		WEI_L2_OUT = self.root+"/"+name+".WEI_L2.out"
+		#DRAM skip for now
+		
+		if(self.RUN_WEI_BUFFERS):
+			with open(WEI_TOGGLE_file, "w") as f:
+				f.write("#include <iostream>\n")
+				f.write("#include <algorithm>\n")
+				f.write(cpp_read_file_helper())
+				f.write(bit_count_helper())
+				f.write("int main(){\n")
+				f.write(f"int OUT = {OUT};\n")
+				f.write(f"int IN = {IN};\n")
+				f.write(f"int BAT = {BAT};\n")
+				f.write(f"int w_size;\n")
+				f.write(f"std::cout << \"//Reading Weights\" << std::endl;\n")
+				f.write(f"int* weight = lireFichierEtRemplirTableau(\"{w_file}\", &w_size, IN*OUT);\n")
+				f.write(f"std::cout << \"//Reading Weights - DONE\" << std::endl;\n")
+
+				#L1-READ-SIDE, PE-SIDE ()
+				#Counts number of bit toggles (1 -> 0, 0->1) for each tile
+				f.write(f"""
+				int pe_bins[{self.FC_WEIS}];
+				int prev_wb[{self.FC_WEIS}];
+				for (int j = 0; j < {self.FC_WEIS}; j++) {{
+					pe_bins[j] = 0;
+					prev_wb[j] = 0;
+				}}
+				""")
+				
+				#L2-side-READ/WRITE
+				f.write(f"""
+				int L2_bins[{self.L2_LEN//self.WEI_PREC}];
+				int L2_prev_wb[{self.L2_LEN//self.WEI_PREC}];
+				for (int j = 0; j < {self.L2_LEN//self.WEI_PREC}; j++) {{
+					L2_bins[j] = 0;
+					L2_prev_wb[j] = 0;
+				}}
+				""")
+				
+				#L1-side-WRITE
+				f.write(f"""
+				int L1_bins[{self.L1_WEI_LEN//self.WEI_PREC}];
+				int L1_prev_wb[{self.L1_WEI_LEN//self.WEI_PREC}];
+				for (int j = 0; j < {self.L1_WEI_LEN//self.WEI_PREC}; j++) {{
+					L1_bins[j] = 0;
+					L1_prev_wb[j] = 0;
+				}}
+				""")
+							
+				f.write(f'std::cout << "// Analyzing Workload" << std::endl;\n')
+				if(self.RUN_GOLDEN):
+					f.write(f'std::ofstream L1_PE_goldenOutFile("{WEI_L1_TRACE_FILE}");\n');
+					
+				f.write(f'int sim_cycles = 0;\n')				
+				B_DEPTH = "BAT"
+				N_DEPTH = "OUT"
+				I_DEPTH = "IN"
+				B_START = "0"
+				N_START = "0"
+				I_START = "0"
+				cnt = 0
+				for lp in self.FC_LOOP_ORDER:
+					if(lp[0] == "B" and getattr(self, "FC_T"+lp) != 0):
+						f.write(f"for(int {lp} = {B_START}; {lp} < {B_START+'+'+B_DEPTH}; {lp} += {getattr(self, 'FC_T'+lp)})"+"{")
+						B_DEPTH = "FC_T"+lp
+						B_START = lp
+						cnt += 1
+					elif(lp[0] == "I" and getattr(self, "FC_T"+lp) != 0):
+						f.write(f"for(int {lp} = {I_START}; {lp} < {I_START+'+'+I_DEPTH}; {lp} += {getattr(self, 'FC_T'+lp)})"+"{")
+						I_DEPTH = "FC_T"+lp
+						I_START = lp
+						cnt += 1
+					elif(lp[0] == "N" and getattr(self, "FC_T"+lp) != 0):
+						f.write(f"for(int {lp} = {N_START}; {lp} < {N_START+'+'+N_DEPTH}; {lp} += {getattr(self, 'FC_T'+lp)})"+"{")
+						N_DEPTH = "FC_T"+lp
+						N_START = lp					
+						cnt += 1
+				f.write(f'''
+				sim_cycles++;
+				if(sim_cycles > {self.SIM_CYCLES})
+				break;
+
+					int pe = 0;
+					for (int n = N; n < std::min(N + {self.FC_TN}, {OUT}); n++){{
+					for (int i = I; i < std::min(I + {self.FC_TI}, {IN}); i++){{
+						int w_idx = i*{OUT} + n;
+						int wb = weight[w_idx];
+						pe_bins[pe] = pe_bins[pe] + __builtin_popcount(wb^prev_wb[pe]) ;
+						prev_wb[pe] = wb;
+						pe += 1;
+				''')
+				
+				if(self.RUN_GOLDEN):
+					f.write('L1_PE_goldenOutFile << wb <<"\t";\n')
+				
+				f.write(f'''
+					}}
+					}}
+				''')
+				
+				if(self.RUN_GOLDEN):
+					f.write('L1_PE_goldenOutFile << "\\n";\n')
+						
+				
+				for i in range(cnt):
+					f.write("}\n")
+				
+				#SAVE RESULTS
+				f.write(f'std::cout << "// Analyzing Workload - DONE" << std::endl;\n')
+				f.write(f'std::cout << "// Saving PE WEI Data" << std::endl;\n')
+				out_file = WEI_L1_PE_OUT
+				f.write(f'''
+					std::ofstream outFile("{out_file}"); // 创建或覆盖文件
+					if (!outFile.is_open()) {{
+						std::cerr << "Failed to open file!" << std::endl;
+						return 1;
+					}}
+					for (int j = 0; j < {self.FC_WEIS}; j++) {{
+						outFile << pe_bins[j] << "\\n";
+					}}
+					outFile.close();
+					std::cout << "// Saving PE WEI Data - DONE" << std::endl;	
+					free(weight);
+					return 0;
+				}}''')
+			
+			if(self.run_cpp):
+				os.system(f"g++ {WEI_TOGGLE_file}")
+				os.system(".\\a.exe")
+			
+		#DRAM (skip)
+		#DRAM-L2
+		#L2
+		#L2-L1
+		#L1 Buffer
+		#L1-PE (interconnect)
+				
+		ACT_TOGGLE_file = self.root+"/"+name+".ACT_TOGGLE_file.cpp"
+		ACT_L1_PE_OUT = self.root+"/"+name+".ACT_PE.out"
+		ACT_L1_TRACE_FILE = ACT_L1_PE_OUT+".trace"
+		ACT_L1_JSON_FILE = ACT_L1_PE_OUT+".json"
+		ACT_L1_POWER_GOLDEN = ACT_L1_PE_OUT+".golden.txt"		
+		
+		ACT_L1_OUT = self.root+"/"+name+".ACT_L1.out"
+		ACT_L2_L1_OUT = self.root+"/"+name+".ACT_L2_L1.out"
+		ACT_L2_OUT = self.root+"/"+name+".ACT_L2.out"
+		#DRAM skip for now
+		
+		if(self.RUN_ACT_BUFFERS):
+			with open(ACT_TOGGLE_file, "w") as f:
+				f.write("#include <iostream>\n")
+				f.write("#include <algorithm>\n")
+				f.write(cpp_read_file_helper())
+				f.write(bit_count_helper())
+				f.write("int main(){\n")
+				f.write(f"int OUT = {OUT};\n")
+				f.write(f"int IN = {IN};\n")
+				f.write(f"int BAT = {BAT};\n")
+				f.write(f"int w_size;\n")
+				f.write(f"std::cout << \"//Reading Act\" << std::endl;\n")
+				f.write(f"int* inputs = lireFichierEtRemplirTableau(\"{i_file}\", &w_size, IN*BAT);\n")
+				f.write(f"std::cout << \"//Reading Act - DONE\" << std::endl;\n")
+		
+				#L1-READ-SIDE, PE-SIDE ()
+				#Counts number of bit toggles (1 -> 0, 0->1) for each tile
+				f.write(f"""
+				int pe_bins[{self.FC_ACTS}];
+				int prev_wb[{self.FC_ACTS}];
+				for (int j = 0; j < {self.FC_ACTS}; j++) {{
+					pe_bins[j] = 0;
+					prev_wb[j] = 0;
+				}}
+				""")
+				
+				#L2-side-READ/WRITE
+				f.write(f"""
+				int L2_bins[{self.L2_LEN//self.ACT_PREC}];
+				int L2_prev_wb[{self.L2_LEN//self.ACT_PREC}];
+				for (int j = 0; j < {self.L2_LEN//self.ACT_PREC}; j++) {{
+					L2_bins[j] = 0;
+					L2_prev_wb[j] = 0;
+				}}
+				""")
+				
+				#L1-side-WRITE
+				f.write(f"""
+				int L1_bins[{self.L1_ACT_LEN//self.ACT_PREC}];
+				int L1_prev_wb[{self.L1_ACT_LEN//self.ACT_PREC}];
+				for (int j = 0; j < {self.L1_ACT_LEN//self.ACT_PREC}; j++) {{
+					L1_bins[j] = 0;
+					L1_prev_wb[j] = 0;
+				}}
+				""")
+							
+				f.write(f'std::cout << "// Analyzing Workload" << std::endl;\n')
+				if(self.RUN_GOLDEN):
+					f.write(f'std::ofstream L1_PE_goldenOutFile("{ACT_L1_TRACE_FILE}");\n');
+					
+				f.write(f'int sim_cycles = 0;\n')				
+				B_DEPTH = "BAT"
+				N_DEPTH = "OUT"
+				I_DEPTH = "IN"
+				B_START = "0"
+				N_START = "0"
+				I_START = "0"
+				cnt = 0
+				for lp in self.FC_LOOP_ORDER:
+					if(lp[0] == "B" and getattr(self, "FC_T"+lp) != 0):
+						f.write(f"for(int {lp} = {B_START}; {lp} < {B_START+'+'+B_DEPTH}; {lp} += {getattr(self, 'FC_T'+lp)})"+"{")
+						B_DEPTH = "FC_T"+lp
+						B_START = lp
+						cnt += 1
+					elif(lp[0] == "I" and getattr(self, "FC_T"+lp) != 0):
+						f.write(f"for(int {lp} = {I_START}; {lp} < {I_START+'+'+I_DEPTH}; {lp} += {getattr(self, 'FC_T'+lp)})"+"{")
+						I_DEPTH = "FC_T"+lp
+						I_START = lp
+						cnt += 1
+					elif(lp[0] == "N" and getattr(self, "FC_T"+lp) != 0):
+						f.write(f"for(int {lp} = {N_START}; {lp} < {N_START+'+'+N_DEPTH}; {lp} += {getattr(self, 'FC_T'+lp)})"+"{")
+						N_DEPTH = "FC_T"+lp
+						N_START = lp					
+						cnt += 1
+				f.write(f'''
+				sim_cycles++;
+				if(sim_cycles > {self.SIM_CYCLES})
+				break;
+		
+					int pe = 0;
+					for (int i = I; i < std::min(I + {self.FC_TI}, {IN}); i++){{
+					for (int b = B; b < std::min(B + {self.FC_TB}, {BAT}); b++){{	
+						int w_idx = b*{IN} + i;
+						int wb = inputs[w_idx];
+						pe_bins[pe] = pe_bins[pe] + __builtin_popcount(wb^prev_wb[pe]) ;
+						prev_wb[pe] = wb;
+						pe += 1;
+				''')
+				#这里的问题...
+				
+				if(self.RUN_GOLDEN):
+					f.write('L1_PE_goldenOutFile << wb <<"\t";\n')
+				
+				f.write(f'''
+					}}
+					}}
+				''')
+				
+				if(self.RUN_GOLDEN):
+					f.write('L1_PE_goldenOutFile << "\\n";\n')
+						
+				
+				for i in range(cnt):
+					f.write("}\n")
+				
+				#SAVE RESULTS
+				f.write(f'std::cout << "// Analyzing Workload - DONE" << std::endl;\n')
+				f.write(f'std::cout << "// Saving PE ACT Data" << std::endl;\n')
+				out_file = ACT_L1_PE_OUT
+				f.write(f'''
+					std::ofstream outFile("{out_file}"); // 创建或覆盖文件
+					if (!outFile.is_open()) {{
+						std::cerr << "Failed to open file!" << std::endl;
+						return 1;
+					}}
+					for (int j = 0; j < {self.FC_ACTS}; j++) {{
+						outFile << pe_bins[j] << "\\n";
+					}}
+					outFile.close();
+					std::cout << "// Saving PE ACT Data - DONE" << std::endl;	
+					free(inputs);
+					return 0;
+				}}''')
+			
+			if(self.run_cpp):
+				os.system(f"g++ {ACT_TOGGLE_file}")
+				os.system(".\\a.exe")		
+				
+			
+			if(self.RUN_GOLDEN):
+				WEI_MULTICAST_CONFIG = {
+					"EDAVerification": self.EDAVerification,
+					"CLOCK": 1,
+					"cap_load": 0.1,
+					"fanout_load": 0.1,
+					"tech": "tsmc40",
+					"terms": self.FC_TI*self.FC_TN,
+					"fanout": self.FC_TB,
+					"prec": self.WEI_PREC,
+					"OutputPowerFile": WEI_L1_POWER_GOLDEN				  
+				}
+				ACT_MULTICAST_CONFIG = {
+					"EDAVerification": self.EDAVerification,
+					"CLOCK": 1,
+					"cap_load": 0.1,
+					"fanout_load": 0.1,
+					"tech": "tsmc40",
+					"terms": self.FC_TI*self.FC_TB,
+					"fanout": self.FC_TN,
+					"prec": self.ACT_PREC,
+					"OutputPowerFile": ACT_L1_POWER_GOLDEN				  
+				}
+				with open(ACT_L1_JSON_FILE, "w") as json_file:
+				    json.dump(ACT_MULTICAST_CONFIG, json_file, indent=4)  # indent 用于格式化输出
+				with open(WEI_L1_JSON_FILE, "w") as json_file:
+				    json.dump(WEI_MULTICAST_CONFIG, json_file, indent=4)  # indent 用于格式化输出
+				# print(f'sbt "test:runMain multipliers.Multiplier2SpecFromFile {PE_TRACE_FILE} {PE_JSON_FILE}"')
+				os.system(f'sbt "test:runMain networks.MulticastSpecFromFile {ACT_L1_TRACE_FILE} {ACT_L1_JSON_FILE}"')		
+				os.system(f'sbt "test:runMain networks.MulticastSpecFromFile {WEI_L1_TRACE_FILE} {WEI_L1_JSON_FILE}"')
+			
+			
+			if(self.RUN_MODEL):
+			
+				#L1 buffer / SRAM
+			
+				#Interconnect
+				with open(WEI_L1_PE_OUT, "r") as f:
+					pe_bins = np.zeros((256*256))#custom in the future
+					for idx,l in enumerate(f.readlines()):
+						pe_bins[idx] = int(l)
+					# pe_bins = pe_bins.reshape((256,256)).T.reshape((-1))
+					
+					from power_models.multiplier2_tester import get_multiplier2_LUT
+					mult_power = get_multiplier2_LUT(self.WEI_PREC)
+					
+					bin_power = mult_power * pe_bins
+					# print(bin_power)
+					# print(np.sum(bin_power))
+					PE_POWER = self.FC_PES*np.sum(bin_power)/self.SIM_CYCLES#based on multiple-pe
+					print("Estimate PE_POWER = ", PE_POWER)
+					
+				
+				with open(ACT_L1_PE_OUT, "r") as f:
+					pe_bins = np.zeros((256*256))#custom in the future
+					for idx,l in enumerate(f.readlines()):
+						pe_bins[idx] = int(l)
+					# pe_bins = pe_bins.reshape((256,256)).T.reshape((-1))
+					
+					from power_models.multiplier2_tester import get_multiplier2_LUT
+					mult_power = get_multiplier2_LUT(self.WEI_PREC)
+					
+					bin_power = mult_power * pe_bins
+					# print(bin_power)
+					# print(np.sum(bin_power))
+					PE_POWER = self.FC_PES*np.sum(bin_power)/self.SIM_CYCLES#based on multiple-pe
+					print("Estimate PE_POWER = ", PE_POWER)
+					
+					
+				
+		#PE
+		PE_file = self.root+"/"+name+".PE.cpp"
+		PE_OUT_FILE = self.root+"/"+name+".PE.out"
+		PE_TRACE_FILE = PE_OUT_FILE+".trace"
+		PE_JSON_FILE = PE_OUT_FILE+".json"
+		PE_POWER_GOLDEN = PE_OUT_FILE+".golden.txt"
+		if(self.RUN_PE):
+			with open(PE_file, "w") as f:
+				f.write("#include <iostream>\n")
+				f.write(cpp_read_file_helper())
+				f.write(bit_count_helper())
+				
+				f.write("int main(){\n")
+				f.write(f"int OUT = {OUT};\n")
+				f.write(f"int IN = {IN};\n")
+				f.write(f"int BAT = {BAT};\n")
+				# f.write(f"int* weight_bits = (int*) malloc(sizeof(int)*IN*OUT);\n")
+				# f.write(f"int* act_bits = (int*) malloc(sizeof(char)*BAT*IN);\n") 
+				f.write(f"int w_size;\n")
+				f.write(f"int i_size;\n")
+				f.write(f"std::cout << \"//Reading Weights and Inputs\" << std::endl;\n")
+				f.write(f"int* weight = lireFichierEtRemplirTableau(\"{w_file}\", &w_size, IN*OUT);\n")
+				f.write(f"int* input = lireFichierEtRemplirTableau(\"{i_file}\", &i_size, BAT*IN);\n") 
+				f.write(f"std::cout << \"//Reading Weights and Inputs - DONE\" << std::endl;\n")
+					
+				#Compressed Model, convert A B, to bit counts
+				# f.write(f"int* weight_bits = countBitsInArray(weight, w_size);\n")
+				# f.write(f"int* input_bits = countBitsInArray(input, i_size);\n")
+				
+				#Traverse unroll loop order
+				# f.write(f"int* bins = (int*) malloc(sizeof(int)*256*256);\n")
+				f.write("""
+				int bins[256][256];
+				for (int i = 0; i < 256; i++) {
+					for (int j = 0; j < 256; j++) {
+						bins[i][j] = 0;
+					}
+				}
+				""")
+				B_DEPTH = "BAT"
+				N_DEPTH = "OUT"
+				I_DEPTH = "IN"
+				B_START = "0"
+				N_START = "0"
+				I_START = "0"
+				
+				cnt = 3
+				#Don't need real loop
+				f.write(f'std::cout << "// Analyzing Workload" << std::endl;\n')
+				if(self.RUN_GOLDEN):
+					f.write(f'std::ofstream goldenOutFile("{PE_TRACE_FILE}");\n');
+					
+				f.write(f"""
+				int sim_cycles = 0;
+				for(int B = 0; B < {B_DEPTH} ; B++){{
+					for(int N = 0; N < {OUT}; N++){{
+						for(int I = 0; I <{IN}; I++){{
+							sim_cycles++;
+							if(sim_cycles > {self.SIM_CYCLES})
+							break;
+				""")
+				
+				# for lp in self.FC_LOOP_ORDER:
+				# 	if(lp[0] == "B" and getattr(self, "FC_T"+lp) != 0):
+				# 		f.write(f"for(int {lp} = {B_START}; {lp} < {B_START+'+'+B_DEPTH}; {lp} += {getattr(self, 'FC_T'+lp)})"+"{")
+				# 		B_DEPTH = "FC_T"+lp
+				# 		B_START = lp
+				# 		cnt += 1
+				# 	elif(lp[0] == "I" and getattr(self, "FC_T"+lp) != 0):
+				# 		f.write(f"for(int {lp} = {I_START}; {lp} < {I_START+'+'+I_DEPTH}; {lp} += {getattr(self, 'FC_T'+lp)})"+"{")
+				# 		I_DEPTH = "FC_T"+lp
+				# 		I_START = lp
+				# 		cnt += 1
+				# 	elif(lp[0] == "N" and getattr(self, "FC_T"+lp) != 0):
+				# 		f.write(f"for(int {lp} = {N_START}; {lp} < {N_START+'+'+N_DEPTH}; {lp} += {getattr(self, 'FC_T'+lp)})"+"{")
+				# 		N_DEPTH = "FC_T"+lp
+				# 		N_START = lp					
+				# 		cnt += 1
+						
+				#collect information
+				
+
+				f.write(f'''
+					int w_idx = I*{OUT} + N;
+					int i_idx = B*{BAT} + I;
+					int wb = weight[w_idx];//weight_bits[w_idx];
+					int ib = input[i_idx];//input_bits[i_idx];
+					bins[wb][ib  ] = bins[wb][ib] + 1;
+				''')
+				
+				if(self.RUN_GOLDEN):
+					f.write('goldenOutFile << wb <<"\t"<< ib << "\\n";\n')
+						
+				for lp in range(cnt):
+					f.write("}\n")
+				f.write(f'std::cout << "// Analyzing Workload - DONE" << std::endl;\n')
+				f.write(f'std::cout << "// Saving Data" << std::endl;\n')
+				
+				if(self.RUN_GOLDEN):
+					f.write(f'goldenOutFile.close();\n')
+				
+				f.write(f'''
+					std::ofstream outFile("{PE_OUT_FILE}"); // 创建或覆盖文件
+					if (!outFile.is_open()) {{
+						std::cerr << "Failed to open file!" << std::endl;
+						return 1;
+					}}
+					for(int wb = 0; wb < 256; wb ++){{
+						for(int ib = 0 ; ib < 256; ib++){{
+							outFile << bins[wb][ib] << "\\n"; //bins[wb][ib]
+						}}
+					}}
+					outFile.close();
+					std::cout << "// Saving Data - DONE" << std::endl;	
+					free(weight);
+					free(input);
+					return 0;
+				}}''')
+		
+			if(self.run_cpp):
+				os.system(f"g++ {PE_file}")
+				os.system(".\\a.exe")
+			
+			
+		
+			if(self.RUN_GOLDEN):
+				MULT_CONFIG = {
+					
+					"EDAVerification": self.EDAVerification,
+					
+					"MULTS": 2,
+					"CLOCK": 1,
+					"cap_load": 0.1,
+					"fanout_load": 0.1,
+					
+					"tech": "tsmc40",
+					
+					"radix": 1,
+					"multiplierType": "HighRadixMultiplier",
+					"side": "None",
+					"prec2":self.ACT_PREC,
+					"prec1":self.WEI_PREC,
+					"adderType":"SimpleAdder2",
+					
+					"OutputPowerFile": PE_POWER_GOLDEN
+				}
+				with open(PE_JSON_FILE, "w") as json_file:
+					json.dump(MULT_CONFIG, json_file, indent=4)  # indent 用于格式化输出
+				print(f'sbt "test:runMain multipliers.Multiplier2SpecFromFile {PE_TRACE_FILE} {PE_JSON_FILE}"')
+				os.system(f'sbt "test:runMain multipliers.Multiplier2SpecFromFile {PE_TRACE_FILE} {PE_JSON_FILE}"')
+			
+		
+			if(self.RUN_MODEL):
+				with open(PE_OUT_FILE, "r") as f:
+					pe_bins = np.zeros((256*256))#custom in the future
+					for idx,l in enumerate(f.readlines()):
+						pe_bins[idx] = int(l)
+					# pe_bins = pe_bins.reshape((256,256)).T.reshape((-1))
+					
+					from power_models.multiplier2_tester import get_multiplier2_LUT
+					mult_power = get_multiplier2_LUT(self.WEI_PREC)
+					
+					bin_power = mult_power * pe_bins
+					# print(bin_power)
+					# print(np.sum(bin_power))
+					PE_POWER = self.FC_PES*np.sum(bin_power)/self.SIM_CYCLES#based on multiple-pe
+					print("Estimate PE_POWER = ", PE_POWER)
+					
+			
+			
+			
+		#PE-ACCUM (Adder Tree)
+		#Based on tiling and loop-order
+		
+		
+		#ACCUM
+		
+		
+		#OUT (re-scaling)
+		
+		#OUT-L1
+		
+		#L1
+		
+		#L1-L2
+		
+		#L2
+		
+		#L2-DRAM
+		

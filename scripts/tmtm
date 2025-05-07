@@ -1,0 +1,30 @@
+		#b1 model
+	if(1 in mode or 2 in mode):
+		general_config['mode'] = [0]
+		b1_res = ap.execute_get_lut( name=name, 
+			out_features= 'Total_Pwr',
+			constant_features = general_config,
+			need_zero =False,#True,# False,#True,#False,#False,
+			variable_features = {
+				"in_0": general_config['entry_bits'][0],#[1<<i for i in range(prec1)],
+			})
+		xiao_r = min(b1_res['Total_Pwr']['res'][-1][0])
+		da_r = max(b1_res['Total_Pwr']['res'][-1][0])
+
+	if(0 in mode):
+		gold_res_r = get_golden(name,general_config, input_data)
+
+	if(1):
+		if(1 in mode):				
+			print("b1_r",b1_res['Total_Pwr']['res'][-1][-1])
+
+		if(2 in mode):
+			sparsity = 1-sparsity
+			print("b2_r",sparsity,xiao_r + (da_r-xiao_w)*sparsity)#b1_res['Total_Pwr']['res'][-1][0]		
+
+
+	print("our_r",res_r['Total_Pwr']['res'][-1][-1])
+	input()
+	#exit()
+	return res_r#, res_w
+

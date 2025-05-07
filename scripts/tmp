@@ -1,0 +1,287 @@
+"""
+
+	
+			"ADDER_TREE": {
+				"units": self.hc["TN"] * self.hc["TB"]* self.hc["TX"]* self.hc["TY"],
+				"input_metadata": {
+					"toggle": {
+						"update": "__builtin_popcount(cur_adder_tree[adder_tree_accum][jjj]^prev_adder_tree[adder_tree][jjj])",
+				}},
+
+
+				"input_bins": [self.hc["ADDER_TREE_PREC"]*INNER_GROUP  ],	
+				'cur_update': ['weights_data*inputs_data'],
+				'prev_update': ['weights_data*inputs_data'],
+				'input_group': INNER_GROUP,
+				"output_metadata": {
+	"update": f"__builtin_popcount(accumulated_adder_tree) ",	
+				 },
+				"output_bins": self.hc["ADDER_TREE_PREC"],
+				"output_update": 'accumulated_adder_tree',
+				"output_condition": '',
+
+				"accumulated_input": False,
+
+				'reset_trigger': [],
+				'accumulate': True,
+				'accumulate_op': 'accumulate_adder_tree[group_adder_tree] + cur_adder_tree',
+
+				"config": {
+					"primitive": "adders.AdderN",
+					"prec": self.hc["ADDER_TREE_PREC"],
+					"terms": INNER_GROUP//self.hc["ADDER_TREE_DEPTH"],
+					"depth": self.hc["ADDER_TREE_DEPTH"],
+					"Adder2Type": self.hc["ADDER_TREE_CORE_ADDER_TYPE"],
+					"type": self.hc["ADDER_TREE_TYPE"],
+				}
+			},
+
+
+
+
+			"ACCUMULATOR": {
+				"units": ADDER_TREE_UNITS,
+				"input_metadata": {
+					"toggle": {
+						"update": "__builtin_popcount(cur_adder_tree[adder_tree_accum][jjj]^prev_adder_tree[adder_tree][jjj])",
+				}},
+
+
+				"input_bins": [self.hc["ADDER_TREE_PREC"]*INNER_GROUP  ],	
+				'cur_update': ['accumulate_adder_tree[accumulator'],
+				'prev_update': ['accumulate_adder_tree[accumulator] + prev_accumulator[accumulator][0]'],
+				'input_group': INNER_GROUP,
+				"output_metadata": {
+	"update": f"__builtin_popcount(accumulated_adder_tree) "	
+				 },
+				"output_bins": self.hc["ADDER_TREE_PREC"],
+				"output_update": '',#accumulated_adder_tree',
+				"output_condition": '',
+
+				"accumulated_input": True,
+
+				'reset_trigger': [],
+				'accumulate': False,
+				'accumulate_op': '',
+
+				"config": {
+					"primitive": "adders.Accumulator",
+					"prec": self.hc["ACCUM_PREC"],
+					"terms": 1, #INNER_GROUP//self.hc["ACCUM_DEPTH"],
+					"Adder2Type": self.hc["ACCUM_CORE_ADDER_TYPE"],
+					"type": self.hc["ACCUM_TYPE"],
+				}
+
+			},
+#HARDWARES: PE_ARRAY
+			"PE_ARRAY": {
+				"units": self.hc["TI"]*self.hc["TN"]*self.hc["TB"]*self.hc["TKX"]*self.hc["TKY"]*self.hc["TX"]*self.hc["TY"],
+				"input_metadata": {"bits": {
+	"update": f"__builtin_popcount(weights_data) + {self.hc['WEI_PREC']}*__builtin_popcount(inputs_data)"
+				}},
+				"input_bins": [self.hc["WEI_PREC"], self.hc["ACT_PREC"]],
+				
+				'cur_update': MULTIPLIER_bins,#[ 'weights_data', 'inputs_data'],
+				'prev_update': MULTIPLIER_bins,#['weights_data', 'inputs_data'],
+				'input_group': 1,
+				"output_metadata": { },
+				"output_bins": self.hc["WEI_PREC"]+self.hc["ACT_PREC"],
+				"output_update": 'weights_data * inputs_data',
+				"output_condition": '',
+				#"output_inner_group": ""
+
+
+				"accumulated_input": False,
+
+				'reset_trigger': [],
+				'accumulate': False,
+				'accumulate_op': '',
+				"config": {
+					"primitive": "multipliers.Multiplier2",
+					"multiplierType": self.hc["MULT_TYPE"],
+					"adderType": self.hc["MULT_CORE_ADDER_TYPE"],
+					"side": self.hc.get("MULT_SIDE", "weight"),
+					"prec1":MULT_prec1, "prec2": MULT_prec2, "radix": self.hc['MULT_RADIX']
+				}
+			},
+
+#HARDWARES: L1_WEI_PE_INTERCONNECT
+			"L1_WEI_PE_INTERCONNECT": {
+				"units": self.hc["TI"]*self.hc["TN"]*self.hc["TKX"]*self.hc["TKY"],
+				"input_metadata": {},
+				"input_bins": [self.hc["WEI_PREC"]],
+				"cur_update": ["weights_data"],
+				"prev_update": ["weights_data"],
+				"input_group": 1,
+				"output_metadata": {},
+				"output_bins": self.hc["WEI_PREC"],					
+				"output_update": "",
+				"output_condition": '',
+				"accumulated_input": False,
+				'reset_trigger': [],
+				'accumulate': False,
+				'accumulate_op': '',
+				"config": {
+					#is a universal Multicasting unit, meaning output can be fanout, input can be serially shifted-in if necessary. A serial2parallel output unit. 
+#parallel2serial unit is for systolic loading preferably, generally L2 width >= L1 width
+					"primitive": "network.Multicast",
+					"prec": self.hc["WEI_PREC"], 
+					#"systolic_depth": self.hc["INTERCONNECT_WEI_SYSTOLIC_CAST_RATIO"],
+
+				#the total amount of fanout
+				#trade terms for fanout
+				#benefifical for high fanout systems, etc. fanout = 512 very hard, i.e. 512pF so going to have to use systolic
+					"terms": self.hc["INTERCONNECT_WEI_SYSTOLIC_CAST_RATIO"] ,
+					"fanout":self.hc["TX"]*self.hc["TB"]*self.hc["TY"]//self.hc["INTERCONNECT_WEI_SYSTOLIC_CAST_RATIO"] ,
+				}
+
+				
+			},
+
+
+
+
+
+
+
+	def infer_pe(self,params):
+		#any parameters we want to copy into the cpp
+		PARAMETERS = params['params']
+		#data we want to copy to the cpp
+		DATA = [
+			params['inputs_obj'],
+			params['weights_obj']]
+		#nets / hardware modules we want to track the toggling and features of 
+		NET_DATA = {
+			"PE_ARRAY": self.MODULES["PE_ARRAY"]
+		}	
+		#loop orders and such
+		LOOP_ORDER = self.hc["LOOP_ORDER"]
+		#variable definitions
+		LOOP_VAR_DEFINITIONS = self.LOOP_VAR_DEFINITIONS			
+		hooks = {}#self.MODULES["PE_ARRAY"]["hooks"]
+		#generate the c++ file
+		name = params["SIM_PARAMS"]["name"]
+		root = params["SIM_PARAMS"]["root"]
+
+		output_files= generate_cpp(root, name, PARAMETERS, DATA, NET_DATA, LOOP_ORDER, LOOP_VAR_DEFINITIONS,tiling_pre="T",hardware_config= self.hc, SIM_CYCLE_LIM = params['SIM_PARAMS']['SIM_CYCLES'], hooks = hooks, run_it = params['SIM_PARAMS']["RUN_CPP"], need_trace = params['SIM_PARAMS']['GEN_TRACE'] )
+
+		return output_files
+	
+	def infer_adder_accum(self,params):
+		return {}	
+
+	def infer_buffers(self,params): 
+		return {}	
+
+
+
+	#1. L1_WEI
+	def infer_L1_WEI_READ(self, params):
+		PARAMETERS = params['params']
+		DATA = [
+			params['weights_obj']]
+		NET_DATA = {
+			"L1_WEI_READ": self.MODULES["L1_WEI_READ"]
+		}	
+		#skip casting
+		skips = ["TB", "TX", "TY"]#["TB"]#["TB", "TX", "TY"]
+		self.MODULES["L1_WEI_READ"]['skips'] = skips
+		LOOP_ORDER = self.hc["LOOP_ORDER"]
+		LOOP_VAR_DEFINITIONS = self.LOOP_VAR_DEFINITIONS			
+		hooks = {}#self.MODULES["PE_ARRAY"]["hooks"]
+		name = params["SIM_PARAMS"]["name"]
+		root = params["SIM_PARAMS"]["root"]
+		output_files= generate_cpp(root, name, PARAMETERS, DATA, NET_DATA, LOOP_ORDER, LOOP_VAR_DEFINITIONS,tiling_pre="T",hardware_config= self.hc, SIM_CYCLE_LIM = params['SIM_PARAMS']['SIM_CYCLES'], hooks = hooks, run_it = params['SIM_PARAMS']["RUN_CPP"], need_trace = params['SIM_PARAMS']['GEN_TRACE'] , inner_loops_skips = skips)
+
+		#output_files['cycles'] 
+		return output_files
+	
+	def infer_L1_WEI_WRITE(self, params):
+		PARAMETERS = params['params']
+		DATA = [
+			params['weights_obj']]
+		NET_DATA = {
+			"L1_WEI_WRITE": self.MODULES["L1_WEI_READ"]
+		}	
+		self.MODULES["L1_WEI_READ"]['config']['mode'] = 1	
+		skips =["TB", "TX", "TY"]# ["TB", "TX", "TY"]#["TB"]#["TB", "TX", "TY"]
+		self.MODULES["L1_WEI_READ"]['skips'] = skips
+		LOOP_ORDER = self.hc["LOOP_ORDER"]
+
+		LOOP_ORDER = filter_loop_order(self.hc["LOOP_ORDER"], ["KX", "KY", "N", "I"])
+		LOOP_VAR_DEFINITIONS = self.LOOP_VAR_DEFINITIONS			
+		hooks = {}#self.MODULES["PE_ARRAY"]["hooks"]
+		name = params["SIM_PARAMS"]["name"]
+		root = params["SIM_PARAMS"]["root"]
+		output_files= generate_cpp(root, name, PARAMETERS, DATA, NET_DATA, LOOP_ORDER, LOOP_VAR_DEFINITIONS,tiling_pre="T",hardware_config= self.hc, SIM_CYCLE_LIM = params['SIM_PARAMS']['SIM_CYCLES'], hooks = hooks, run_it = params['SIM_PARAMS']["RUN_CPP"], need_trace = params['SIM_PARAMS']['GEN_TRACE'] , inner_loops_skips = skips)
+		return output_files
+	
+	
+	def infer_L1_ACT_READ(self, params):
+		PARAMETERS = params['params']
+		DATA = [
+			params['inputs_obj']]
+		NET_DATA = {
+			"L1_ACT_READ": self.MODULES["L1_ACT_READ"]
+		}	
+		skips = ["TN"]#["TB"]#["TB", "TX", "TY"]
+		self.MODULES["L1_ACT_READ"]['skips'] = skips
+		LOOP_ORDER = self.hc["LOOP_ORDER"]
+		LOOP_VAR_DEFINITIONS = self.LOOP_VAR_DEFINITIONS			
+		hooks = {}#self.MODULES["PE_ARRAY"]["hooks"]
+		name = params["SIM_PARAMS"]["name"]
+		root = params["SIM_PARAMS"]["root"]
+		output_files= generate_cpp(root, name, PARAMETERS, DATA, NET_DATA, LOOP_ORDER, LOOP_VAR_DEFINITIONS,tiling_pre="T",hardware_config= self.hc, SIM_CYCLE_LIM = params['SIM_PARAMS']['SIM_CYCLES'], hooks = hooks, run_it = params['SIM_PARAMS']["RUN_CPP"], need_trace = params['SIM_PARAMS']['GEN_TRACE'] , inner_loops_skips = skips)
+
+		#output_files['cycles'] 
+		return output_files
+	
+	def infer_L1_ACT_WRITE(self, params):
+		PARAMETERS = params['params']
+		DATA = [
+			params['inputs_obj']]
+		NET_DATA = {
+			"L1_ACT_WRITE": self.MODULES["L1_WEI_READ"]
+		}	
+		self.MODULES["L1_ACT_READ"]['config']['mode'] = 1		
+		skips =[]# ["TB", "TX", "TY"]#["TB"]#["TB", "TX", "TY"]
+		self.MODULES["L1_ACT_READ"]['skips'] = skips
+		LOOP_ORDER = self.hc["LOOP_ORDER"]
+
+		LOOP_ORDER = filter_loop_order(self.hc["LOOP_ORDER"], ["TKX", "TKY", "TN", "TI"])
+		LOOP_VAR_DEFINITIONS = self.LOOP_VAR_DEFINITIONS			
+		hooks = {}#self.MODULES["PE_ARRAY"]["hooks"]
+		name = params["SIM_PARAMS"]["name"]
+		root = params["SIM_PARAMS"]["root"]
+		output_files= generate_cpp(root, name, PARAMETERS, DATA, NET_DATA, LOOP_ORDER, LOOP_VAR_DEFINITIONS,tiling_pre="T",hardware_config= self.hc, SIM_CYCLE_LIM = params['SIM_PARAMS']['SIM_CYCLES'], hooks = hooks, run_it = params['SIM_PARAMS']["RUN_CPP"], need_trace = params['SIM_PARAMS']['GEN_TRACE'] , inner_loops_skips = skips)
+		return output_files
+	
+	
+	def infer_L1_ACT_WRITE(self, params):
+		PARAMETERS = params['params']
+		DATA = [
+			params['inputs_obj']]
+		NET_DATA = {
+			"L1_ACT_WRITE": self.MODULES["L1_WEI_READ"]
+		}	
+		self.MODULES["L1_ACT_READ"]['config']['mode'] = 1		
+		skips =[]# ["TB", "TX", "TY"]#["TB"]#["TB", "TX", "TY"]
+		self.MODULES["L1_ACT_READ"]['skips'] = skips
+		LOOP_ORDER = self.hc["LOOP_ORDER"]
+
+		LOOP_ORDER = filter_loop_order(self.hc["LOOP_ORDER"], ["KX", "KY", "X", "Y", "N", "B"])
+		LOOP_VAR_DEFINITIONS = self.LOOP_VAR_DEFINITIONS			
+		hooks = {}#self.MODULES["PE_ARRAY"]["hooks"]
+		name = params["SIM_PARAMS"]["name"]
+		root = params["SIM_PARAMS"]["root"]
+		output_files= generate_cpp(root, name, PARAMETERS, DATA, NET_DATA, LOOP_ORDER, LOOP_VAR_DEFINITIONS,tiling_pre="T",hardware_config= self.hc, SIM_CYCLE_LIM = params['SIM_PARAMS']['SIM_CYCLES'], hooks = hooks, run_it = params['SIM_PARAMS']["RUN_CPP"], need_trace = params['SIM_PARAMS']['GEN_TRACE'] , inner_loops_skips = skips)
+		return output_files
+	
+	
+
+
+
+
+"""
+

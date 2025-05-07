@@ -1,0 +1,68 @@
+26
+Conv1 GENERAL
+Conv1 PE_ARRAY
+Conv1 ADDER_TREE
+Conv1 ACCUMULATOR
+Conv1 WEI_LOADER
+Conv1 ACT_LOADER
+Conv1 OUT_LOADER
+Conv1 WEI_PE_CAST
+Conv1 ACT_PE_CAST
+Conv1 L2
+Conv1 {'ADDER_TREE': 127181, 'ACCUMULATOR': 127181, 'WEI_LOADER': 3328, 'ACT_LOADER': 152320, 'OUT_LOADER': 13300.0, 'WEI_PE_CAST': 127181, 'ACT_PE_CAST': 127181, 'L2': 578752} 578752
+Conv1 {'WEI_LOADER': 64.0, 'ACT_LOADER': 256.0, 'L2': 256.0}
+1055
+Conv2 GENERAL
+Conv2 PE_ARRAY
+Conv2 ADDER_TREE
+Conv2 ACCUMULATOR
+Conv2 WEI_LOADER
+Conv2 ACT_LOADER
+Conv2 OUT_LOADER
+Conv2 WEI_PE_CAST
+Conv2 ACT_PE_CAST
+Conv2 L2
+Conv2 {'ADDER_TREE': 1153, 'ACCUMULATOR': 1153, 'WEI_LOADER': 135040, 'ACT_LOADER': 1120, 'OUT_LOADER': 35.0, 'WEI_PE_CAST': 1153, 'ACT_PE_CAST': 1153, 'L2': 36000} 135040
+Conv2 {'WEI_LOADER': 64.0, 'ACT_LOADER': 256.0, 'L2': 256.0}
+Conv1 GENERAL
+Conv1 PE_ARRAY
+loading  generated/PowerModels/Total_Pwr/Multiplier2.pkl
+{'multiplierType': {'HighRadixMultiplier': 0, 'BitSerialMultiplier': 1}, 'side': {'0': 0, 'A': 1, 'B': 2, 'dual': 3}, 'adderType': {'SimpleAdder2': 0}}
+Conv1 ADDER_TREE
+loading  generated/PowerModels/Total_Pwr/AdderN.pkl
+{}
+Conv1 ACCUMULATOR
+loading  generated/PowerModels/Total_Pwr/Accumulator.pkl
+{'inv_CLOCK': {1.0: 0}, 'prec_in': {4: 0, 16: 1, 32: 2}, 'prec_out': {32: 0, 16: 1}, 'terms': {1: 0}}
+   CLOCK  ...                                              out_0
+0      1  ...  0,0,0,0,1280,1280,1280,1280,1280,1280,1280,177...
+
+[1 rows x 10 columns]
+Conv1 WEI_LOADER
+Conv1 ACT_LOADER
+Conv1 OUT_LOADER
+Conv1 WEI_PE_CAST
+Conv1 ACT_PE_CAST
+Conv1 L2
+Conv1 {'PE_ARRAY': 1.0711448047612393, 'ADDER_TREE': 0.02211839999999999, 'ACCUMULATOR': 0.029595866134070593}
+Conv2 GENERAL
+Conv2 PE_ARRAY
+loading  generated/PowerModels/Total_Pwr/Multiplier2.pkl
+{'multiplierType': {'HighRadixMultiplier': 0, 'BitSerialMultiplier': 1}, 'side': {'0': 0, 'A': 1, 'B': 2, 'dual': 3}, 'adderType': {'SimpleAdder2': 0}}
+Conv2 ADDER_TREE
+loading  generated/PowerModels/Total_Pwr/AdderN.pkl
+{}
+Conv2 ACCUMULATOR
+loading  generated/PowerModels/Total_Pwr/Accumulator.pkl
+{'inv_CLOCK': {1.0: 0}, 'prec_in': {4: 0, 16: 1, 32: 2}, 'prec_out': {32: 0, 16: 1}, 'terms': {1: 0}}
+   CLOCK  ...                                              out_0
+0      1  ...  60,60,109,109,109,149,149,205,217,237,237,267,...
+
+[1 rows x 10 columns]
+Conv2 WEI_LOADER
+Conv2 ACT_LOADER
+Conv2 OUT_LOADER
+Conv2 WEI_PE_CAST
+Conv2 ACT_PE_CAST
+Conv2 L2
+Conv2 {'PE_ARRAY': 2.3247991786520323, 'ADDER_TREE': 0.07485439999999993, 'ACCUMULATOR': 0.03588063172393246}
