@@ -37,7 +37,7 @@ python3 src/main/python/GenerateDesign.py arch.json
 ```
 
 ## 4. Design exploration, simple search method
-### Multiple passes to find solutions at the Pareto
+### Multiple passes to find solutions at the Pareto Front
 ```
 python3 src/main/python/DSE.py
 python3 src/main/python/DSE_secondpass.py
