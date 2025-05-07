@@ -9,6 +9,8 @@ OSCAR is a comprehensive AI generator and accurate power estimator. It is compri
 
 Primitive generation involves configuration of chisel/verilog templates to generate the key building blocks of an AI accelerator hardware. ML power-based modeling refers to the modeling of each primitive and hardware module via ML methodologies using data-sensitive toggling features to capture detailed power variations due to data. Power estimation at the architectural level is the overall calculation of the power at the higher level, based on adding the sub-module powers. Architectural analysis and generation refers to the synthesis of AI accelerators at the core-level with automatic testbenchs. Simple Design Space Exploration refers to the search of designs within generatable designs to find the optimal performance and power AI accelerators.
 
+Note: The code is in-preparation of finalization and cleaning and removal of any 3rd party IPs.
+
 Here are several sample flows that OSCAR is capable of running:
 ## 1. Primitive Generation and Power Modeling Training
 ### Example1. How to create training data and use ML to model the power of the multiplier primitive
